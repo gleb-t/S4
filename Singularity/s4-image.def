@@ -1,0 +1,85 @@
+Bootstrap: docker
+From: ubuntu:18.04
+
+%setup
+   mkdir -p ${SINGULARITY_ROOTFS}/build
+
+   mkdir -p ${SINGULARITY_ROOTFS}/app/src
+   mkdir -p ${SINGULARITY_ROOTFS}/app/plant
+   mkdir -p ${SINGULARITY_ROOTFS}/app/out
+   mkdir -p ${SINGULARITY_ROOTFS}/app/cred
+   chmod a+rw ${SINGULARITY_ROOTFS}/app
+
+%files
+    # Copy the specific directories manually, so we dont grab the 'out' dir.
+    ./PythonExtras /app/src/PythonExtras
+    ./PythonExtrasC /app/src/PythonExtrasC
+    ./Lib /app/src/Lib
+    ./Siamese /app/src/Siamese
+    ./Singularity /app/src/Singularity 
+    ./environment.yml /app/src/
+
+%environment
+    export PYTHONPATH="/app/src:${PYTHONPATH}"
+    export PATH="/var/conda/envs/siamese/bin:${PATH}"
+    export HOME=/tmp  # Point home at tmp so there is a writable dir at the path. (scikit needs this)
+
+    export DEV_VOLUME_DATA_PATH=/app/data
+    export DEV_OUT_PATH=/app/out
+    export DEV_PYPLANT_PATH=/app/plant
+    export DEV_SIAMESE_CONFIG_PATH=/app/config
+    
+    # Activate the conda env. Use dot, since our shell is sh for some reason.
+    . /var/conda/etc/profile.d/conda.sh
+    conda activate /var/conda/envs/siamese
+
+%post
+    apt-get update
+    
+    #export TZ="Europe/Berlin"
+    apt-get install -y --no-install-recommends \
+        software-properties-common \
+        build-essential \
+        wget \
+        git \
+        openssh-client \
+        curl \
+        libxrender1 \
+        libsm6 libxext6 libxrender-dev
+    
+    # Install conda.
+    wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+    bash ./Miniconda3-latest-Linux-x86_64.sh -b -p /var/conda
+    
+    # Setup conda env.
+    /var/conda/bin/conda env create -q -p /var/conda/envs/siamese --file /app/src/environment.yml
+ 
+    . /var/conda/etc/profile.d/conda.sh
+    conda activate /var/conda/envs/siamese
+
+    # Build PythonExtras
+    cd /app/src/PythonExtrasC
+    make
+    
+    cd /app/src
+    chmod a+x Singularity/run-siamese.sh
+    
+%runscript
+    echo "Use the app syntax to run the program. I.e. '--app siamese'"
+
+%apprun siamese
+    echo "Starting the container, running siamese."
+    echo "Arguments received: $@"
+    
+    cd /app
+    exec /app/src/Singularity/run-siamese.sh $@
+
+%test
+    echo "S4 container."
+
+%labels
+    Author gleb.tkachev@visus.uni-stuttgart.de
+
+%help
+    Run things until they run.
+

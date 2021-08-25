@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Siamese prototype</title>
+
+    <!-- Bootstrap core CSS -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.4.1/css/bootstrap-grid.css" rel="stylesheet">
+    <!-- Minimal bootstrap CSS with buttons and typography. -->
+    <link href="{{ url_for('static', filename='bootstrap.min.css') }}" rel="stylesheet">
+{#    <link href="{{ url_for('static', filename='bootstrap.theme.min.css') }}" rel="stylesheet">#}
+    <!-- Font awesome for icons. -->
+    <link href="//netdna.bootstrapcdn.com/font-awesome/3.2.1/css/font-awesome.css" rel="stylesheet">
+
+    <link href="{{ url_for('static', filename='style.css') }}" rel="stylesheet">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script>
+        // --- Data provided to the template. ---
+        // noinspection JSAnnotator
+        const patchShape = {{ patchShape | safe }};
+        // noinspection JSAnnotator
+        const memberMetadata = {{ memberMetadata | safe }};
+        // noinspection JSAnnotator
+        const colormap = {{ colormap | safe }};
+        const ensembleName = '{{ ensembleName | safe }}';
+        // --------------------------------------
+
+        const maxMemberShape = [0, 1, 2, 3].map(dim => Math.max(...Object.values(memberMetadata).map(s => s[dim]), 0));
+        const maxMemberDuration = maxMemberShape[0];
+        // If we're using spatial patches, position it in the center of the frame.
+        const queryPatchSpatialCoords = maxMemberShape.map((x, i) => Math.floor((x - patchShape[i]) / 2)).slice(1);
+        const patchAspectRatio = maxMemberShape[2] / maxMemberShape[3];  // y/x ratio.
+        // This is how wide it can be to fit all the frames.
+        // Clip to make sure that images aren't too small when can't fit.
+        const frameDivWidthRel = Math.max(2, 100 / maxMemberDuration);
+        const patchHeight = maxMemberShape[2];
+        const onReady = (callback) => {
+            if (document.readyState !== "loading")
+                callback();
+            else
+                document.addEventListener("DOMContentLoaded", callback);
+        };
+
+        // const memberRowDict = {};
+
+        // --- App state. ---
+        const frameDivDict = {};
+        let queryPatchDict = {};
+        let queryResult = {
+            matches: [],
+            distanceMin: 0.0,
+            distanceMax: 1.0
+        };
+
+        let matchesToShow = 50;
+        // ------------------
+
+        console.log(maxMemberShape);
+
+        onReady(() =>
+        {
+            console.log('Starting.');
+
+            // Delete all the example images, but keep the example row-div.
+            document.querySelectorAll('#navigation-panel .timeline-frame').forEach(e => e.remove());
+            // Clone the example row to be used to quickly construct
+            const memberRowExample = document.querySelector('#navigation-panel .member-row');
+            const memberRowPrototype = memberRowExample.cloneNode(true);
+            // Measure the size now, when the element is positioned and rendered.
+            const timelineWidthPx = memberRowExample.querySelector('.timeline-frame-container').clientWidth;
+            // Remove the example row now.
+            memberRowExample.remove();
+
+            // Clear all example patch rows from the page.
+            const patchRowExamples = document.querySelectorAll('#query-panel .patch-row');
+            patchRowExamples.forEach(e => e.remove());
+
+            document.querySelector('#query-button').addEventListener('click', onQueryButtonClick);
+            document.querySelector('#sort-button').addEventListener('click', onSortButtonClick);
+            document.querySelector('#export-button').addEventListener('click', onExportButtonClick);
+            document.querySelector('#import-button').addEventListener('click', onImportButtonClick);
+            document.querySelector('#match-number-slider').addEventListener('click', onMatchNumberSliderChange);
+            document.querySelector('#match-number-slider').setAttribute('value', String(matchesToShow));
+
+            // Prepare an intersection observer.
+            let options =
+            {
+                root: document.querySelector('#navigation-panel'),
+                rootMargin: '0px',
+                threshold: 0
+            };
+
+            let intersectObserver = new IntersectionObserver(onIntersectChange, options);
+
+            const navPanel = document.querySelector('#navigation-panel');
+            for (const [memberName, shape] of Object.entries(memberMetadata))
+            {
+                /** @type HTMLElement */
+                const memberRow = memberRowPrototype.cloneNode(true);
+                const memberRowHead = memberRow.querySelector('.head');
+                const timelineCont = memberRow.querySelector('.timeline-frame-container');
+                const timelineGutter = memberRow.querySelector('.selection-gutter');
+
+                memberRow.id = 'member-row-' + sanitizeSel(memberName);
+                memberRowHead.textContent = memberName;
+
+                // Ideally, we'd let the timeline scale itself to the images.
+                // But since we're using lazy loading, we need it to have some predetermined size,
+                // so that we don't load all the images immediately because the zero-height timelines are all visible.
+                // ^^^ This isn't properly implemented. We'll have to have a callback remove the styling after
+                //     the image load, but I'm too lazy right now. Compute a perfect size instead.
+
+                // Compute the exact image height, so there's no 'shuffling around' of images.
+                // todo This is hacky, but avoids dealing with image loading callbacks and images jumping around on load.
+                // Clip to avoid images that are too small.
+                const minFrameHeight = timelineWidthPx * frameDivWidthRel / 100 * patchAspectRatio;
+                const frameHeight = Math.max(minFrameHeight, timelineWidthPx / maxMemberShape[0] * patchAspectRatio);
+                timelineCont.style.flex = `0 0 ${frameHeight}px`;  // todo Images don't fit perfectly.
+
+                for (let f = 0; f < shape[0]; f++)
+                {
+                    const framePadded = String(f).padStart(6, '0');
+                    const imagePath = `/image/${ensembleName}/${memberName}/frame-${framePadded}.png`;
+                    const frameDiv = createElementWithClass('div', 'timeline-frame');
+                    {#frameDiv.style.flex = `0 0 ${frameDivWidth}%`;#}
+                    frameDiv.style.width = `${frameDivWidthRel}%`;
+                    // frameDiv.style.height = '100%';
+                    frameDiv.frameInfo = {
+                        'memberName': memberName,
+                        'frame': f,
+                        'id': memberName + '_frame' + f
+                    };
+
+                    const frameImg = document.createElement('img');
+                    frameImg.style.width = '100%';
+                    frameImg.srcSaved = imagePath;  // Save the URL, but don't load the image yet.
+
+                    // frameDiv.style.height = `${frameDivHeightPx}px`;  // Fix the height while the image is unloaded.
+
+                    frameDiv.addEventListener('click', onFrameClick, false);
+
+                    frameDiv.appendChild(frameImg);
+                    frameDivDict[memberName + String(f)] = frameDiv;
+                    timelineCont.appendChild(frameDiv);
+                }
+
+                navPanel.appendChild(memberRow);
+                intersectObserver.observe(memberRow);
+            }
+        });
+
+        function onFrameClick(e)
+        {
+            const frameDiv = e.target.closest('.timeline-frame');
+            const frameInfo = frameDiv.frameInfo;
+            console.log(frameInfo);
+
+            if (frameInfo.id in queryPatchDict)
+            {
+                // Remove a patch from the query.
+                delete queryPatchDict[frameInfo.id];
+            }
+            else
+            {
+                // Add a new patch to the query.
+                const isPositive = !e.shiftKey;
+                queryPatchDict[frameInfo.id] =
+                {
+                    memberName: frameInfo.memberName,
+                    coords: [frameInfo.frame, ...queryPatchSpatialCoords],
+                    isPositive: isPositive
+                };
+            }
+
+            updateQueryUi();
+        }
+
+        function onQueryButtonClick(e)
+        {
+            if (Object.keys(queryPatchDict).length === 0)
+                return;
+
+            // Prepare the support set description in backend format.
+            const requestData = [];
+            for (let patch of Object.values(queryPatchDict))
+            {
+                requestData.push([
+                    {
+                        memberName: patch.memberName,
+                        coords: patch.coords
+                    },
+                    patch.isPositive
+                ]);
+            }
+
+            fetch('get-matches', {
+                method: 'post',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestData)
+            }).then(response => {
+                return response.json();
+
+            }).then(data => {
+                console.log(data);
+                queryResult = data;
+
+                updateQueryResultsUi();
+            });
+        }
+
+        function onSortButtonClick(e)
+        {
+            updateMemberRowOrderUi();
+        }
+
+        function onExportButtonClick(e)
+        {
+            window.alert(JSON.stringify(queryPatchDict));
+        }
+
+        function onImportButtonClick(e)
+        {
+            try
+            {
+                const userInput = prompt('Enter query JSON.');
+                queryPatchDict = JSON.parse(userInput);
+                updateQueryUi();
+            }
+            catch (e) {
+                console.log("Failed to parse the query JSON: " + userInput);
+            }
+        }
+
+        function onMatchNumberSliderChange(e)
+        {
+            matchesToShow = parseInt(e.target.value);
+            const labelHtml = document.querySelector(`#query-controls label[for=${e.target.id}]`);
+            labelHtml.textContent = `Top ${matchesToShow} matches`;
+            updateQueryResultsUi();
+        }
+
+
+        function onIntersectChange(entries, observer)
+        {
+            for (let entry of entries)
+            {
+                const memberRow = entry.target;
+                const timelineContainer = memberRow.querySelector('.timeline-frame-container');
+                const frameImgs = memberRow.querySelectorAll('img');
+                for (let frameImg of frameImgs)
+                {
+                    if (entry.isIntersecting)
+                    {
+                        // Load the image.
+                        frameImg.src = frameImg.srcSaved;
+                    }
+                }
+            }
+        }
+
+        function updateQueryUi()
+        {
+            // Clear the table.
+            const queryPanelTable = document.querySelector('#query-panel .patch-table');
+            while (queryPanelTable.firstChild)
+                queryPanelTable.firstChild.remove();
+
+            // Clear the marks.
+            const existingMarks = document.querySelectorAll('#navigation-panel .mark.query');
+            existingMarks.forEach(e => e.remove());
+
+            const queryPatchesSorted = Object.entries(queryPatchDict).sort(function([keyA, patchA], [keyB, patchB]) {
+                if (patchA.isPositive > patchB.isPositive)
+                    return -1;
+                else if (patchA.isPositive < patchB.isPositive)
+                    return 1;
+                else
+                    return keyA < keyB;
+            });
+
+            for (let [key, patchDesc] of queryPatchesSorted)
+            {
+                // Add patch rows to the query table.
+                const patchRow = createPatchRow(patchDesc, true);
+
+                patchRow.querySelector('.head').innerHTML =
+                    `<td>${patchDesc.memberName}</td> <td>t: ${patchDesc.coords[0]}</td>`;
+
+                queryPanelTable.appendChild(patchRow);
+
+                // Add the marks to the navigation pane.
+                const markClassNames = ['query', patchDesc.isPositive ? 'positive' : 'negative'];
+                const gutterMark = createGutterMark(patchDesc.coords[0], markClassNames);
+
+                const timelineGutter = document.querySelector(`#member-row-${sanitizeSel(patchDesc.memberName)} .selection-gutter`);
+                timelineGutter.appendChild(gutterMark);
+            }
+
+            // updateMemberRowOrderUi();
+        }
+
+        function updateQueryResultsUi()
+        {
+            const matchesTable = document.querySelector('#matches-panel .patch-table');
+            while (matchesTable.firstChild)
+                matchesTable.firstChild.remove();
+
+            const existingMarks = document.querySelectorAll('#navigation-panel .mark.match, ' +
+                                                            '#navigation-panel .mark.distance');
+            existingMarks.forEach(e => e.remove());
+
+            // Clear existing match classes.
+            Object.values(frameDivDict).forEach(d => d.classList.remove('match'));
+
+            document.querySelector('#match-number-slider').setAttribute('max', String(queryResult.matches.length));
+
+
+            const distancesSorted = [];
+            for (let iMatch = 0; iMatch < queryResult.matches.length; iMatch++)
+            {
+                const patchDesc = queryResult.matches[iMatch];
+
+                const memberRowSelector = '#member-row-' + sanitizeSel(patchDesc.memberName);
+                const memberRow = document.querySelector(memberRowSelector);
+
+                distancesSorted.push(patchDesc.distance);
+
+                // Create distance marks for all patches returned by the server.
+                const distanceMark = createGutterMark(patchDesc.coords[0], ['distance']);
+                const t = (patchDesc.distance - queryResult.distanceMin) /
+                          (queryResult.distanceMax - queryResult.distanceMin);
+                distanceMark.style.backgroundColor = colormap[Math.round((colormap.length - 1) * t)];
+                const memberRowDistGutter = memberRow.querySelector('.distance-gutter');
+                memberRowDistGutter.appendChild(distanceMark);
+
+                // For top N matches, create an entry in the matches list and show a mark.
+                if (iMatch < matchesToShow)  // Only show top N matches.
+                {
+                    const patchRow = createPatchRow(patchDesc);
+                    patchRow.querySelector('.head').innerHTML =
+                        `<td>${patchDesc.memberName}</td> <td>t: ${patchDesc.coords[0]}</td>`;
+                    matchesTable.appendChild(patchRow);
+
+                    for (let i = 0; i < patchShape[0]; i++) {
+                        let frameDiv = frameDivDict[patchDesc.memberName + String(patchDesc.coords[0] + i)]
+                        frameDiv.classList.add('match');
+                    }
+
+                    // distanceMark.classList.add('match')
+
+                    // const memberRowSelectGutter = memberRow.querySelector('.selection-gutter');
+                    // const gutterMark = createGutterMark(patchDesc.coords[0], ['match']);
+                    // memberRowSelectGutter.appendChild(gutterMark);
+                }
+            }
+
+            // updateMemberRowOrderUi();
+            updateDistancePlotUi(distancesSorted);
+        }
+
+        function updateMemberRowOrderUi()
+        {
+            // Init an empty member-to-count map with zeros.
+            const memberNames = Object.keys(memberMetadata);
+            const zeroPerMember = memberNames.map(memberName => [memberName, 0]);
+            const queryExamplesPerMemberPos = Object.fromEntries(zeroPerMember);
+            const queryExamplesPerMemberNeg = Object.fromEntries(zeroPerMember);
+            const matchesPerMember = Object.fromEntries(zeroPerMember);
+
+            // Count how many times each member is mentioned in the query or in the matches.
+            for (let queryPatch of Object.values(queryPatchDict))
+                if (queryPatch.isPositive)
+                    queryExamplesPerMemberPos[queryPatch.memberName] += 1;
+                else
+                    queryExamplesPerMemberNeg[queryPatch.memberName] += 1;
+
+            for (let patchDesc of queryResult.matches.slice(0, matchesToShow))
+                matchesPerMember[patchDesc.memberName] += 1;
+
+            // todo Is this a smart score? Shouldn't we use actual distances somehow?
+            // Compute a total score, such that we first sort by query and then matches,
+            // and positive query patches are shown before the negative.
+            const memberSortScores = Object.fromEntries(memberNames.map(memberName => {
+                // A multiplier that ensure all entries of one type are above entries of another.
+                let largeNumber = maxMemberShape[0];
+                // Max match score is max frame number.
+                const queryScore = queryExamplesPerMemberPos[memberName] * largeNumber * largeNumber +
+                                   queryExamplesPerMemberNeg[memberName] * largeNumber;
+                const matchScore = matchesPerMember[memberName];
+
+                return [memberName, queryScore + matchScore];
+            }));
+
+            // Re-insert the elements in the sorted order.
+            const navPanel = document.querySelector('#navigation-panel');
+            memberNames.sort((a, b) => memberSortScores[b] - memberSortScores[a]).forEach(memberName => {
+                const memberRow = document.querySelector('#member-row-' + sanitizeSel(memberName));
+                navPanel.appendChild(memberRow);
+            });
+        }
+
+        function updateDistancePlotUi(distancesSorted)
+        {
+            const distancesData = {
+                x: [...Array(distancesSorted.length).keys()],
+                y: distancesSorted,
+                type: 'scatter',
+                name: 'distance'
+            };
+
+            const cutoffLineData = {
+                x: [matchesToShow, matchesToShow],
+                y: [queryResult.distanceMin, queryResult.distanceMax],
+                type: 'line'
+            };
+
+            const layout = {
+                showlegend: false,
+                xaxis: {range: [0, distancesSorted.length]},
+                yaxis: {range: [queryResult.distanceMin, queryResult.distanceMax]},
+                margin: {
+                    l: 0,
+                    r: 0,
+                    t: 0,
+                    b: 0
+                }
+            };
+
+            Plotly.newPlot(
+                document.querySelector('#distribution-plot'),
+                [distancesData, cutoffLineData],
+                layout,
+                {
+                    autosize: true,
+                    scrollZoom: true,
+                    displayModeBar: false
+                });
+        }
+
+        function createGutterMark(frame, classNames)
+        {
+            const gutterMark = createElementWithClass('div', 'mark');
+            classNames.forEach(n => gutterMark.classList.add(n));
+
+            gutterMark.style.left = frame * frameDivWidthRel + '%';
+            gutterMark.style.width = patchShape[0] * frameDivWidthRel + '%';
+
+            return gutterMark;
+        }
+
+        function createPatchRow(patchDesc, showIcon = false)
+        {
+            /*
+            <div class="patch-row">
+                <div class="head"></div>
+                <div class="timeline">
+                    <div class="timeline-frame-container">
+                        <div class="timeline-frame"><img src="/image/cylinder/cylinder_70_40_40/frame-000015.png"></div>
+                        <div class="timeline-frame"><img src="/image/cylinder/cylinder_70_40_40/frame-000016.png"></div>
+                        <div class="timeline-frame"><img src="/image/cylinder/cylinder_70_40_40/frame-000017.png"></div>
+                    </div>
+                </div>
+            </div>
+             */
+
+            const patchRow = createElementWithClass('div', 'patch-row');
+            patchRow.appendChild(createElementWithClass('div', 'head'));
+            const timeline = patchRow.appendChild(createElementWithClass('div', 'timeline'));
+            const frameContainer = timeline.appendChild(createElementWithClass('div', 'timeline-frame-container'));
+
+            const patchFrame = patchDesc.coords[0];
+            for (let f = patchFrame; f < patchFrame + patchShape[0]; f++)
+            {
+                const framePadded = String(f).padStart(6, '0');
+                const imagePath = `/image/${ensembleName}/${patchDesc.memberName}/frame-${framePadded}.png`;
+
+                const frameDiv = frameContainer.appendChild(createElementWithClass('div', 'timeline-frame'));
+                frameDiv.style.height = '100%';
+                const frameImg = frameDiv.appendChild(document.createElement('img'));
+                frameImg.style.height = '100%';
+                frameImg.src = imagePath;
+
+                // Show the icon on the last frame.
+                if (showIcon && f === patchFrame + patchShape[0] - 1)
+                {
+                    const iconDiv = createElementWithClass('div', 'patch-icon');
+                    iconDiv.innerText = patchDesc.isPositive ? '+' : '-';
+                    frameDiv.append(iconDiv);
+                }
+            }
+
+            return patchRow;
+        }
+
+        /**
+         *
+         * @param {String} elementName
+         * @param {String} className
+         * @returns {HTMLElement}
+         */
+        function createElementWithClass(elementName, className)
+        {
+            const div = document.createElement(elementName);
+            div.className = className;
+
+            return div;
+        }
+
+        /**
+         * Sanitize a string for usage as a selector.
+         * @param selectorString
+         * @returns {*}
+         */
+        function sanitizeSel(selectorString)
+        {
+            return selectorString.replace(/[#.,\[\]$:]/g, '');
+        }
+
+    </script>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <div id="left-panel" class="col-2">
+                <div id="query-controls">
+                    <div class="button-panel">
+{#                        <input id="query-button" name="query-button" type="button" value="Query"/>#}
+                        <a id="query-button" class="btn btn-primary" href="#"><i class="icon-search"></i> Query</a>
+                        <a id="sort-button" class="btn btn-primary" href="#"><i class="icon-sort-by-attributes-alt"></i> Sort</a>
+                        <a id="export-button" class="btn btn-default" href="#"><i class="icon-upload"></i> Export</a>
+                        <a id="import-button" class="btn btn-default" href="#"><i class="icon-download"></i> Import</a>
+                    </div>
+                    <br>
+                    <div id="distribution-panel">
+                        <div id="distribution-plot">
+                        </div>
+                        <input id="match-number-slider" name="match-number-slider" type="range"
+                               min="0" max="100" step="5" value="50" />
+                    </div>
+                    <br>
+                    <label for="match-number-slider">Top 50 matches</label>
+                </div>
+                <div id="query-matches-container">
+                    <div id="query-panel">
+                        <h2>Query:</h2>
+                        <div class="patch-table">
+                            <div class="patch-row">
+                                <div class="head"></div>
+                                <div class="timeline">
+                                    <div class="timeline-frame-container">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="matches-panel">
+                        <h2>Matches:</h2>
+                        <div class="patch-table">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="navigation-panel" class="col-10">
+                <div class="member-row">
+                    <div class="head"></div>
+                    <div class="timeline">
+                        <div class="timeline-frame-container">
+                            <div class="timeline-frame"><img src=""></div>
+                            <div class="timeline-frame"><img src=""></div>
+                            <div class="timeline-frame"><img src=""></div>
+                        </div>
+                        <div class="timeline-gutter distance-gutter"></div>
+                        <div class="timeline-gutter selection-gutter">
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

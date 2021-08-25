@@ -1,0 +1,172 @@
+body {
+    overflow: hidden;
+}
+
+#navigation-panel {
+    height: 95vh;
+    overflow-x: scroll;
+    overflow-y: scroll;
+
+    box-shadow: -5px 5px 2px -2px rgba(0,0,0,0.25);
+    border-radius: 0 0 0 5px;
+}
+
+#left-panel {
+    height: 95vh;
+    display: flex;
+    flex-direction: column;
+}
+
+#query-matches-container {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    overflow-y: scroll;
+
+    padding: 15px;
+    box-shadow: -5px 5px 2px -2px rgba(0,0,0,0.25);
+    border-radius: 0 0 0 5px;
+}
+
+#query-controls {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 auto;
+}
+
+.button-panel {
+    margin-top: 10px;
+    margin-bottom: 10px;
+}
+
+.member-row {
+    display: flex;
+}
+
+.member-row .head {
+    flex: 0 0 210px;
+    /* Needed to make sure long strings of text are forced to break at 200px. */
+    min-width: 210px;
+    overflow-wrap: break-word;
+}
+
+.timeline {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+}
+
+.timeline-frame-container {
+    display: block;
+
+    /*  Hacks to remove whitespace between and around inline-block elements.
+        And make the distance gutter immediately adjacent to the images.
+    */
+    white-space: nowrap;
+    font-size: 0;
+    margin-bottom: -1px;
+}
+
+.timeline-frame {
+    display: inline-block;
+}
+
+.timeline-frame img {
+    display: block;   /* Removes the unneeded whitespace around an otherwise inline element.*/
+}
+
+.timeline-frame.match img {
+    box-shadow: 0 -3px 5px 2px rgba(0,177,0,1);
+}
+
+.timeline-gutter {
+    display: flex;
+    flex: 1 0 12px;
+    position: relative;
+}
+
+.timeline-gutter.selection-gutter {
+    margin-bottom: 6px;
+}
+
+.timeline-gutter.distance-gutter {
+    flex: 1 0 6px;
+}
+
+
+.timeline-gutter .mark {
+    position: absolute;
+    height: 100%;
+
+    border: black solid 1px;
+    border-top: none;
+    border-radius: 0 0 3px 3px;
+}
+
+.timeline-gutter .mark.query {
+    background-color: #41d836;
+}
+
+.timeline-gutter .mark.query.negative {
+    background-color: #fe4a49;
+}
+
+/*.timeline-gutter .mark.match {
+    height: 50%;
+    order: 10;
+
+    background-color: #028ce8;
+}*/
+
+.distance-gutter .mark.distance {
+    border: none;
+    border-radius: 0;
+}
+
+/*.distance-gutter .mark.distance.match {
+    border: 2px solid black;
+}*/
+
+#distribution-panel {
+    display: flex;
+    flex: 1 0 auto;
+    flex-direction: column;
+}
+
+#distribution-panel input {
+    flex: 0 0 30px;
+}
+
+#distribution-panel #distribution-plot {
+    display: flex;
+    flex: 1 0 auto;
+
+    max-height: 150px;
+}
+
+
+.patch-table .patch-row .timeline {
+    height: 50px;
+    /*overflow: hidden;*/
+}
+
+.patch-table .patch-row .timeline-frame-container {
+    height: 100%;
+}
+
+.patch-table .patch-row img {
+    height: 100%;
+}
+
+.patch-table .timeline-frame {
+    position: relative;  /* So we can position an icon over the frame. */
+}
+
+.patch-table .timeline-frame .patch-icon {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+
+    font-size: 18px;
+    background-color: white;
+}

@@ -1,0 +1,31 @@
+name: siamese
+dependencies:
+  - python=3.7
+  - pip
+  - numpy=1.21.2
+  - h5py=2.10.0
+  - matplotlib=3.4.3
+  - pandas=1.3.2
+  - Pillow=8.3.1
+  - conda-forge::POT=0.7.0
+  - psutil=5.8.0
+  - pycairo=1.20.1
+  - scikit-image=0.18.3
+  - scikit-learn=0.24.2
+  - scipy=1.7.1
+  - seaborn=0.11.2
+
+  - cudatoolkit=10.0.130-0
+  - cudnn~=7.4
+  - tensorflow-gpu=1.14
+  - keras-gpu=2.2.4
+
+  - pip:
+      - deprecation==2.1.0
+      - beautifultable==1.0.1
+      - pyplant==0.5.1
+      - regex==2021.8.21
+      - jsonpickle==2.0.0
+# If there are issues with the conda TF package, try pip instead.
+#      - tensorflow-gpu==1.14
+#      - keras==2.2.4

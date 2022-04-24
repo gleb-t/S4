@@ -1,7 +1,7 @@
 # S4: Self-Supervised learning of Spatiotemporal Similarity
 Code for the ["S4: Self-Supervised learning of Spatiotemporal Similarity"](https://ieeexplore.ieee.org/document/9503317) paper.
 
-[Replicability Stamp](http://www.replicabilitystamp.org/#https-github-com-gleb-t-s4)
+[Mirror @ DARUS](https://doi.org/10.18419/darus-2174)  |  [Replicability Stamp](http://www.replicabilitystamp.org/#https-github-com-gleb-t-s4)
 
 ![cylinder turbulent query results](images/cylinder-turbulent-query.png)
 ![droplet splashing query results](images/droplet-splashing.png)
